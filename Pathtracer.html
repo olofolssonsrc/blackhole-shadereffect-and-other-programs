@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Path Drawing</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            width: 100%;
+            height: 100%;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+<canvas width="1920" height="1080" id="canvas"></canvas>
+</body>
+<script>
+
+    const rs = 10;
+    const c = 1;
+    const steps = 1000; 
+
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+
+    function distance(a, b){
+        return Math.sqrt(Math.pow(a[0] - b[0], 2) + Math.pow(a[1] - b[1], 2))
+    }
+
+    const pixelToSoaceRatio = 0.1;
+
+    function drawArc(xp, yp, color, radian, circle = false) {
+        ctx.beginPath();
+        ctx.fillStyle = color
+        ctx.strokeStyle = color;
+        ctx.arc(xp, yp, radian, 0, 2 * Math.PI);
+        if(circle){        
+            ctx.stroke();
+        }else{
+            ctx.fill();
+        }
+    }
+    
+    var xDir = 1;
+    var yDir = 0;
+
+    //TODO
+    //[KLAR] 1.implementera scrollrotation
+    //Implementera att ändra skala 
+    //Implementata adaptiv längd på DeltaPhi
+    //Implemetera att ändra massa. samt involvera C i koden.
+    //implementera att hastigheten kan bli mer detaljerad på nått sätt när eventhorizon. kanske med en knapp? Att utrotationen ändringen bör vara konstant. 
+    //kommetera koden.
+
+    var lastx = 0;
+    var lasty = 0;
+    var finalx =0;
+    var finaly= 0;
+
+    alert("drag and drop the blue point, scroll to change angle. red circle should be schwarzschild radius. (work in progres)")
+
+    function tracePath(x, y){
+        ctx.strokeStyle = "black";
+        let r = Math.sqrt(x*x + y*y) * pixelToSoaceRatio;
+        var U = 1 / r;
+
+        //console.log(x + "   " + y)
+
+        var Phi = Math.atan2(y, x);
+        
+        //var Vr = xDir * Math.cos(Phi) + yDir * Math.sin(Phi);
+        //var vPhi = -xDir * Math.sin(Phi) + yDir * Math.cos(Phi); 
+
+        var Vr = xDir * Math.cos(Phi) + yDir * Math.sin(Phi);
+        var vPhi = -xDir * Math.sin(Phi) + yDir * Math.cos(Phi); 
+
+        var DeltaPhi = -0.01;
+
+        if(vPhi < 0){
+          //  console.log("rätt")
+        }else{
+          //  console.log("fel")
+            DeltaPhi *= -1;
+        }
+
+        var drdPhi = r * (Vr / vPhi);
+        var dUdPhi1 = (-1 / (r*r) ) * drdPhi;
+
+        var stopped = false;
+        var hit = false;
+        function updatePosition() {
+
+            if(r <= rs){
+                stopped = true;
+                hit = true;
+                return;
+                //DeltaPhi = 0;
+            }
+            var k1 = dUdPhi2Func(U);
+            var k2 = dUdPhi2Func(U + 0.5 * DeltaPhi * dUdPhi1);
+            var k3 = dUdPhi2Func(U + 0.5 * DeltaPhi * dUdPhi1 + (0.25 * Math.pow(DeltaPhi, 2)) * k1);
+            var k4 = dUdPhi2Func(U + DeltaPhi * dUdPhi1 + (0.5 * Math.pow(DeltaPhi, 2)) * k2);
+            U = U + DeltaPhi * dUdPhi1 + ((DeltaPhi * DeltaPhi) / 6) * (k1 + k2 + k3);
+            r = 1 / U
+            dUdPhi1 = dUdPhi1 + (DeltaPhi / 6) * (k1 + 2 * k2 + 2 * k3 + k4);
+            Phi += DeltaPhi;
+         
+        }
+
+        function dUdPhi2Func(u) {
+            return 1.5 * rs * u * u - u;
+        }
+
+        ctx.beginPath()
+
+        const xPos = r * Math.cos(Phi);
+        const yPos = r * Math.sin(Phi);
+
+
+        for (let i = 0; i < steps; i++) {
+
+            const xPos = r * Math.cos(Phi);
+            const yPos = r * Math.sin(Phi);
+
+            const x = xPos * (1 / pixelToSoaceRatio);
+            const y = yPos* (1 / pixelToSoaceRatio);
+            if(!stopped){
+                lastx = finalx;
+            lasty = finaly;
+            finalx = xPos;
+            finaly = yPos;
+        //    console.log(finalx - lastx)
+            }
+
+
+            if(stopped){
+                ctx.stroke();
+                //console.log(((Phi / (2*Math.PI))) * 360)
+                deflectAngle = Phi;
+                if(hit){
+                    deflectAngle = NaN;
+                }
+                stopped = true;
+                break;
+            }else if (x < -canvas.width *0.5 || x > canvas.width*0.5 || y < -canvas.height *0.5 || y > canvas.height *0.5) {
+             //   console.log(((Phi / (2*Math.PI))) * 360)
+                ctx.stroke();
+                stopped = true;
+            }else{
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+                updatePosition();
+            }
+
+        }
+    }
+    const radius = 5;
+    let isDragging = false;
+
+    function getMousePosition(event) {
+        const rect = canvas.getBoundingClientRect();
+        const x = event.clientX;
+        const y = event.clientY;
+        return { x, y };
+    }
+
+    canvas.addEventListener('mousedown', function(event) {
+        const mousePos = getMousePosition(event);
+        const dist = Math.sqrt(Math.pow((mousePos.x - canvas.width*0.5) - startx, 2) + Math.pow((mousePos.y - canvas.height*0.5) - starty, 2))
+        if (dist <= radius * 3) {
+            isDragging = true;
+            document.body.style.cursor = 'grabbing';
+        }
+        reDraw();
+    });
+
+    canvas.addEventListener('mousemove', function(event) {  
+        if (isDragging) {
+            const mousePos = getMousePosition(event);
+            startx = mousePos.x - canvas.width*0.5;
+            starty = mousePos.y - canvas.height*0.5;
+            reDraw();
+        }
+    });
+
+    canvas.addEventListener('mouseup', function() {
+        isDragging = false;
+        document.body.style.cursor = 'default';
+        reDraw()
+    });
+
+    canvas.addEventListener('mouseout', function() {
+        isDragging = false;
+        document.body.style.cursor = 'default';
+        reDraw()
+    });
+    var ScroolDirAngle = 0.01;
+    window.addEventListener('wheel', function(event) {
+
+        if (event.deltaY < 0) {
+            ScroolDirAngle += 0.01;
+            if (ScroolDirAngle > 2* Math.PI) {
+                ScroolDirAngle = 0.01;
+            }
+
+        } else {
+            ScroolDirAngle -= 0.01;
+            if (ScroolDirAngle < 0){
+                ScroolDirAngle = 2.001*Math.PI;
+            }
+        }
+
+        xDir = Math.cos(ScroolDirAngle)
+        yDir = Math.sin(ScroolDirAngle)
+       // console.log
+        reDraw()
+    });
+
+
+    var startx = -500; 
+    var starty = 0;
+    var deflectAngle = 0;
+    reDraw()
+
+    function reDraw(){
+        ctx.clearRect(-canvas.width / 2, -canvas.height / 2, canvas.width, canvas.height);
+        tracePath(startx, starty);
+        if(isDragging){
+            drawArc(startx, starty, "lightblue", 6);
+        }else{
+            drawArc(startx, starty, "blue", 6);
+        }
+        ctx.fillStyle = "blue"
+        ctx.font = '20px Arial';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'top';
+        const xt = (canvas.width / 2) - 10; 
+        const yt = -(canvas.height / 2) + 10;
+     // ctx.fillText("phi = " + 12233, xt, yt);
+      //ctx.fillText("r = "+ 12323, xt, yt + 30);
+
+        deflectAngle = angleFromVectorAtoB([xDir, yDir], [finalx- lastx, finaly - lasty]);
+
+        ctx.fillText("deflect = "+ (360* (deflectAngle / (2*Math.PI))), xt, yt + 60);
+
+        drawArc(0, 0, "red", 6);
+        drawArc(0, 0, "red", rs/ pixelToSoaceRatio, true);
+        drawArc(0, 0, "red", 6);
+
+    }
+
+    //TODO kolla över denna funktionen
+    function angleFromAtoB(a, b) {
+
+        var A = Math.atan2(a[1], b[0]);
+        var B = Math.atan2(a[1], b[0]); 
+
+        let diff = A - B;
+        if (diff < 0) {
+            diff += 2 * Math.PI;
+        }
+        return diff;
+    }
+
+    function vektorMagnitud(a){
+
+        var acc = 0;
+        for (let i = 0; i < a.length; i++) {
+            acc += Math.pow(a[i], 2); 
+        }
+        return Math.sqrt(acc)
+    }
+
+    //skalning av vector. 
+    function vektorScala(a, scal){
+
+        var res = [];
+        for (var i = 0; i < a.length; i++) {
+            res[i] = a[i]*=scal;    
+        }
+        return res;
+    }
+
+
+    //Enkel subtraktion a - b
+    function vektorSubtraction(a, b){
+
+        var res = [];
+        for (var i = 0; i < a.length; i++) {
+            res[i] = a[i] - b[i];    
+        }
+        return res;
+    }
+
+    function vektorAddition(a, b){
+
+        var res = [];
+        for (var i = 0; i < a.length; i++) {
+            res[i] = a[i] + b[i];    
+        }
+        return res;
+    }
+
+
+    //Enkel vektor projection. vektor a projeceras på vector b.
+    function projektion(a, b){
+        var scal = dotprodukt(a,b) / dotprodukt(b,b);
+        var res = [];
+        for (var i = 0; i < a.length; i++) {
+            res[i] = b[i]*scal;    
+        }
+        return res;
+    }
+
+    //enkel dotprodukt för vektorere
+    function dotprodukt(a, b){
+        var acc = 0;
+        for (var i = 0; i < a.length; i++) {
+            acc += a[i]*b[i];                        
+        }    
+        return acc;   
+    }  
+
+</script>
+</body>
+</html>

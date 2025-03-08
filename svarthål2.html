@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>svarthål</title>
+    <style>
+        body { margin: 0; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+
+        #draggable {
+            cursor: grabbing; 
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas" width="1920" height="1080"></canvas>
+
+    <script>
+
+    const canvas = document.getElementById('canvas');
+    const gl = canvas.getContext('webgl');
+
+
+function resizeCanvas() {
+    const pixelRatio = window.devicePixelRatio || 1;
+    const width = window.innerWidth * pixelRatio;
+    const height = window.innerHeight * pixelRatio;
+
+    canvas.width = width;
+    canvas.height = height;
+
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+
+    gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+}
+
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+
+    const vertexShaderSource = `
+        attribute vec4 a_position;
+        void main(void) {
+            gl_Position = a_position;
+        }
+    `;
+
+    const fragmentShaderSource = `
+        precision mediump float;
+        uniform vec2 u_resolution;  
+        uniform vec3 rotationVector;
+        uniform vec3 rotVecPlane;
+        uniform vec3 rotVecUp;
+        varying vec2 v_texCoord;
+        uniform sampler2D u_INFOtexture;
+        uniform sampler2D u_texture;
+
+        uniform float u_distance;
+
+        float vinkelVek(vec3 a, vec3 b) {
+            float res = dot(a, b) / (length(a) * length(b));
+            return acos(res); 
+        }
+
+        vec3 rotateAround(vec3 a, vec3 b, float theta) {
+            b = normalize(b);             
+            float cosTheta = cos(theta);
+            float sinTheta = sin(theta);
+            
+            return a * cosTheta +
+                cross(b, a) * sinTheta +
+                b * dot(b, a) * (1.0 - cosTheta);
+        }
+
+        const float PI = 3.14159265358979323846;
+
+        float aproxSH(float deg) {
+
+            return mod(0.0151838254908 / (1.0 - 1.2079646170695 * exp(-0.1982376589809 * deg)), PI );                
+        }
+
+        float redVal = -1.0;
+        float fov = PI*0.9;
+        float aproxSH2(float deg){
+
+            vec2 outAngleDist = vec2((deg / PI) , u_distance / 2000.0);
+            vec4 offsethaha = texture2D(u_INFOtexture, outAngleDist);
+
+            vec4 offsethaha1 = texture2D(u_INFOtexture, outAngleDist * 0.975);
+
+            vec4 offsethaha2 = texture2D(u_INFOtexture, outAngleDist * 1.025);
+
+            float greenValue = offsethaha.g ;
+            redVal = offsethaha.r;
+
+            float finalRot =  (2.0 / 3.0)*PI *(offsethaha.g + offsethaha1.g + offsethaha2.g);
+
+            if(offsethaha1.r == 1.0){
+                finalRot =  (2.0 )*PI *(offsethaha.g );
+            }
+
+            return finalRot;
+        }
+
+        float aproxSH3(float deg){
+
+            vec2 outAngleDist = vec2((deg / PI) , u_distance / 2000.0);
+            vec4 offsethaha = texture2D(u_INFOtexture, outAngleDist);
+
+            redVal = offsethaha.r;
+
+            float startColor = offsethaha.r;
+            float endColor = offsethaha.g;
+
+            float distStart = offsethaha.b * 255.0;
+            float distEnd = offsethaha.a * 255.0;
+
+            float pixelWidth = PI / 255.0;
+            int index = int(floor(deg / pixelWidth));
+            float offset = deg - (float(index) * (PI / 255.0));
+
+            float Percentage_offset = offset / pixelWidth;
+            float Percentage_left = distStart / (distStart + distEnd);
+            float Percentage_right = distEnd / (distStart + distEnd) ;
+            
+            float finalRot = (2.0 * PI) * (1.0 / (Percentage_left + Percentage_offset));
+            return finalRot;
+        }
+
+        void main() {
+
+            vec3 sh_dir =  vec3(-1.0, 0.0, 0.0);
+
+            vec2 uv = gl_FragCoord.xy / u_resolution.xy;
+            float ratio = u_resolution.y / u_resolution.x;
+
+            float distScreenX = 2.0*(uv.x - 0.5);
+            float distScreenY = 2.0*ratio*(uv.y - 0.5);
+
+            vec3 newRotVec = rotationVector;
+
+            //fov
+            float f =  abs(1.0 / tan(fov * 0.5)); //f
+            newRotVec *=f;
+            
+            vec3 global = newRotVec + (uv.x - 0.5)*rotVecPlane - ratio*(uv.y - 0.5)*rotVecUp;
+
+            //rotera runt vektorn runt kryssprocukten av global och newROT. 
+
+            float R = sqrt(distScreenX*distScreenX + distScreenY*distScreenY); //R
+
+            float maxDist = sqrt(1.0 + ratio*ratio);
+
+            float angle = fov * (R / maxDist);
+
+            vec3 axis = cross(normalize(global), newRotVec);
+
+            float vinkel_mot_sh = abs(vinkelVek(sh_dir, normalize(global)));
+/*
+
+            vec2 outAngleDist = vec2((angle / PI) , u_distance / 2000.0);
+            vec4 offsethaha = texture2D(u_INFOtexture, outAngleDist);
+
+            redVal = offsethaha.r;
+
+            float startColor = offsethaha.r;
+            float endColor = offsethaha.g;
+
+            float distStart = offsethaha.b * 255.0;
+            float distEnd = offsethaha.a * 255.0;
+
+            float pixelWidth = PI / 255.0;
+            int index = int(floor(angle / pixelWidth));
+            float offset = angle - (float(index) * (PI / 255.0));
+
+            float Percentage_offset = offset / pixelWidth;
+            float Percentage_left = distStart / (distStart + distEnd);
+            float Percentage_right = distEnd / (distStart + distEnd) ;
+            
+            float finalRot = (2.0 * PI) * (1.0 / (Percentage_left + Percentage_offset));
+
+            vec4 color = vec4(offsethaha.b* 255.0 / 10.0 ,0.0 , 0.0, 1.0) ;*/
+/*
+
+
+*/
+
+            vec3 roteradruntAxis = normalize(rotateAround(normalize(global), normalize(axis),  aproxSH2(angle)));
+           
+            vec3 ProjPlane = vec3(roteradruntAxis.x, roteradruntAxis.y, 0.0);
+            vec3 ProjWall = vec3(roteradruntAxis.x, 0.0, roteradruntAxis.z);
+
+            float LengthGlobal = length(roteradruntAxis);
+            float lengthProjPlane = length(ProjPlane);
+            float lengthProjWall = length(ProjWall);
+            
+            vec3 raktFram = vec3(1.0, 0.0, 0.0);
+
+            vec3 raktUpp = vec3(0.0, 0.0, 1.0);
+
+            float minstVinkelY = 0.0;
+            float vinkelY = 0.0;
+            if (LengthGlobal > 0.0) {
+                minstVinkelY = acos(dot(raktUpp, roteradruntAxis) / LengthGlobal);
+                vinkelY = PI - minstVinkelY;
+            }
+
+            float minstVinkelX = 0.0;
+            float vinkelX = 2.0 * PI;
+            if (lengthProjPlane > 0.0) {
+                minstVinkelX = acos(dot(raktFram, ProjPlane) / lengthProjPlane);
+                vinkelX = minstVinkelX;
+            }
+            
+
+            if(ProjPlane.y < 0.0){
+                vinkelX = 2.0*PI - vinkelX;
+            }
+
+
+            float finalUVX = vinkelX / (2.0*PI);
+            float finalUVY = vinkelY / PI;  
+
+            vec2 finalUV = vec2(finalUVX, finalUVY);
+            vec2 clampedUV = clamp(finalUV, 0.0, 1.0);
+            vec4 color = texture2D(u_texture, clampedUV);
+            
+
+ 
+            if(redVal  == 1.0){
+                color =vec4(0.0, 0.0, 0.0, 1.0) ;
+            }
+
+            //  color = vec4(0.0, vinkel_mot_sh / (PI), 0.0, 1.0) ;
+            //  color = color + vec4(0.0, 2.0 * greenValue, 0.0, 1.0);
+
+            gl_FragColor = color;
+            
+
+            }
+
+    `;
+
+    function compileShader(gl, source, type) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            console.error('error' + gl.getShaderInfoLog(shader));
+            gl.deleteShader(shader);
+            return null;
+        }
+        return shader;
+    }
+
+    alert("zoom and pan using mouse")
+
+    const vertexShader = compileShader(gl, vertexShaderSource, gl.VERTEX_SHADER);
+    const fragmentShader = compileShader(gl, fragmentShaderSource, gl.FRAGMENT_SHADER);
+
+    function createProgram(gl, vertexShader, fragmentShader) {
+        const program = gl.createProgram();
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            console.error('eipic fail: ' + gl.getProgramInfoLog(program));
+            return null;
+        }
+        return program;
+    }
+
+    const shaderProgram = createProgram(gl, vertexShader, fragmentShader);
+    gl.useProgram(shaderProgram);
+
+
+    const u_texture = gl.getUniformLocation(shaderProgram, 'u_texture');
+    const u_INFOtexture = gl.getUniformLocation(shaderProgram, 'u_INFOtexture');
+
+
+    const image = new Image();
+    const imageINFO = new Image();
+    image.src =   'https://www.birgittaberggren.com/space-2638158_1280.jpg'; 
+
+    image.crossOrigin = 'anonymous';
+    image.onload = function() {
+    const texture = gl.createTexture();
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texImage2D(
+            gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image
+        );
+        gl.uniform1i(gl.getUniformLocation(shaderProgram, 'u_texture'), 0);
+    };
+
+    imageINFO.src =   'https://www.birgittaberggren.com/TempTest.png'; 
+    imageINFO.crossOrigin = 'anonymous';
+    imageINFO.onload = function() {
+    const INFOtexture = gl.createTexture();
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, INFOtexture);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texImage2D(
+            gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, imageINFO
+        );
+        gl.uniform1i(gl.getUniformLocation(shaderProgram, 'u_INFOtexture'), 1);
+    };
+
+    const vertices = new Float32Array([
+       -1.0,  1.0,  
+       -1.0, -1.0, 
+        1.0,  1.0, 
+        1.0, -1.0, 
+    ]);
+
+    const vertexBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+
+    const positionAttribLocation = gl.getAttribLocation(shaderProgram, 'a_position');
+    gl.vertexAttribPointer(positionAttribLocation, 2, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(positionAttribLocation);
+
+    const resolutionUniformLocation = gl.getUniformLocation(shaderProgram, 'u_resolution');
+    gl.uniform2f(resolutionUniformLocation, canvas.width, canvas.height);
+
+
+    const u_rotationLocation = gl.getUniformLocation(shaderProgram, 'rotationVector');
+    const u_rotVecPlaneLocation = gl.getUniformLocation(shaderProgram, 'rotVecPlane');
+    const u_rotVecUpLocation = gl.getUniformLocation(shaderProgram, 'rotVecUp');
+    const u_distanceLocation = gl.getUniformLocation(shaderProgram, 'u_distance');
+
+
+    var rotationVector = [1, 0, 0];
+    var rotVecUp = [0, 0, 1];
+    var rotVecPlane = [0, -1, 0];
+    var speedX = 0.01;
+    var speedY = 0.01;
+
+    var Phi = 0; 
+    var Theta = 0.5*Math.PI;
+    var varv = 1;
+
+    var distance = 1500;
+
+    document.getElementById('canvas').addEventListener('wheel', function(event) {
+
+        event.preventDefault();
+        distance += event.deltaY * 0.4;
+        console.log(distance)
+
+    })
+
+    var isMouseDown = false;
+    document.addEventListener('mousedown', function() {
+        isMouseDown = true;  
+        document.body.style.cursor = 'grabbing';
+    });
+
+    document.addEventListener('mouseup', function() {
+        isMouseDown = false;
+        document.body.style.cursor = 'default';
+    });
+
+    document.addEventListener('mousemove', (event) => {
+        if(!isMouseDown){
+            return
+        }
+        var movementX = event.movementX || event.mozMovementX || event.webkitMovementX || 0;
+        var movementY = event.movementY || event.mozMovementY || event.webkitMovementY || 0;
+        //theta är upp och ner.
+        Theta -= movementY * 0.005;
+        Phi += varv* movementX * 0.005;
+
+        if(Theta <= 2*Math.PI && Theta >= Math.PI){
+        varv = -1;
+        }else{
+        varv = 1;
+        }
+
+        if(Phi >= Math.PI*2){
+        Phi = 0;
+        }
+
+        if(Phi < 0){
+        Phi = Math.PI*2;
+        }
+
+        if(Theta >= Math.PI*2){
+        Theta = 0;
+        }
+
+        if(Theta < 0){
+        Theta = Math.PI*2;
+        }
+    });
+
+
+    var scalar = 0.5;
+
+    function animate(t) {
+
+        requestAnimationFrame(animate);
+
+        ra = Math.sin(Theta)*Math.cos(Phi);
+        rb = Math.sin(Theta)*Math.sin(Phi);
+        rc = Math.cos(Theta);
+
+        rau = scalar*Math.sin((Math.PI / 2) - Theta)*Math.cos(Phi + Math.PI);
+        rbu = scalar*Math.sin((Math.PI / 2) - Theta)*Math.sin(Phi + Math.PI);
+        rcu = scalar*Math.cos((Math.PI / 2) - Theta);
+
+        rap = scalar*Math.sin((Math.PI / 2))*Math.cos(Phi + (Math.PI / 2));
+        rbp = scalar*Math.sin((Math.PI / 2))*Math.sin(Phi + (Math.PI / 2));
+        rcp = scalar*Math.cos((Math.PI / 2));
+
+        gl.useProgram(shaderProgram);
+        gl.uniform3fv(u_rotationLocation, [ra,rb, rc]);
+        gl.uniform3fv(u_rotVecPlaneLocation, [rap, rbp, rcp]);
+        gl.uniform3fv(u_rotVecUpLocation, [rau, rbu, rcu]);
+        gl.uniform1f(u_distanceLocation, [distance]);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+
+    animate();
+
+    //skippar längden av vektorn
+    //antar enhetsbvektor
+    function KarttillSfär(a){
+
+        var theta = Math.acos(a[2])
+        var phi = Math.atan2(a[0], a[1])
+        return [theta, phi]
+    }
+
+
+    function vektorNormalisera(a){
+        var näm = vektorMagnitud(a);
+        if(näm != 0){
+            return  vektorScala(a, 1 / näm);
+        }else{
+            return Array(näm).fill(0);
+        }
+    }
+
+    //Magnitud av vektor. 
+    function vektorMagnitud(a){
+
+    var acc = 0;
+    for (let i = 0; i < a.length; i++) {
+
+        acc += Math.pow(a[i], 2);
+                        
+    }
+    return Math.sqrt(acc)
+    }
+
+    //skalning av vector. 
+    function vektorScala(a, scal){
+
+    var res = [];
+    for (var i = 0; i < a.length; i++) {
+        res[i] = a[i]*scal;    
+    }
+    return res;
+    }
+
+
+    //Enkel subtraktion a - b
+    function vektorSubtraction(a, b){
+
+    var res = [];
+    for (var i = 0; i < a.length; i++) {
+        res[i] = a[i] - b[i];    
+    }
+    return res;
+    }
+
+    function vektorAddition(a, b){
+
+    var res = [];
+    for (var i = 0; i < a.length; i++) {
+        res[i] = a[i] + b[i];    
+    }
+    return res;
+    }
+
+    //Enkel vektor projection. vektor a projeceras på vector be.
+    function projektion(a, b){
+    var scal = dotprodukt(a,b) / dotprodukt(b,b);
+    var res = [];
+    for (var i = 0; i < a.length; i++) {
+        res[i] = b[i]*scal;    
+    }
+    return res;
+    }
+
+    //enkel dotprodukt för vektorere
+    function dotprodukt(a, b){
+    var acc = 0;
+    for (var i = 0; i < a.length; i++) {
+        acc += a[i]*b[i];                        
+    }    
+    return acc;   
+    }       
+
+
+
+    </script>
+</body>
+</html>

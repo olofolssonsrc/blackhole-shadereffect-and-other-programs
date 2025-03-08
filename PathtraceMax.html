@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head >
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Path Drawing</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            width: 100%;
+            height: 100%;
+        }
+
+    </style>
+</head>
+<body id = "body">
+    <div id="myDiv"></div>
+    <script src='https://cdn.plot.ly/plotly-3.0.0.min.js'></script>
+ <canvas id="canvas" ></canvas>
+</body>
+<script>
+    /*
+    This code is to numerically solve the path equation. 
+    And store results to a texture, that is to be used in the sader program. 
+
+    The code is not completed, therefor not commented and optimized. 
+    */
+
+
+    //const resX = 4000;
+    //const resY = 1080;
+    //const resX = 768;
+    //const resY = 432;
+    const resX = 3840;
+    const resY = 50;
+    //const resX = 384;
+    //const resY = 216;
+    //const resX = 192;
+    //const resY = 108;
+    //const resX = 255;
+    //const resY = 50;
+
+
+    const rs = .2;
+    const c = 1;
+    const steps = 100000; 
+
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = resX;
+    canvas.height = resY;
+    ctx.imageSmoothingEnabled = false;
+    //canvas.width = 100;
+    //canvas.height = 100;
+    //ctx.translate(canvas.width / 2, canvas.height / 2);
+
+    function distance(a, b){
+        return Math.sqrt(Math.pow(a[0] - b[0], 2) + Math.pow(a[1] - b[1], 2))
+    }
+
+    const pixelToSoaceRatio = 0.01;
+
+    function drawArc(xp, yp, color, radian, circle = false) {
+        ctx.beginPath();
+        ctx.fillStyle = color
+        ctx.strokeStyle = color;
+        ctx.arc(xp, yp, radian, 0, 2 * Math.PI);
+        if(circle){        
+            ctx.stroke();
+        }else{
+            ctx.fill();
+        }
+    }
+    
+    var lastx = 0;
+    var lasty = 0;
+    var finalx =0;
+    var finaly= 0;
+
+    //numerical integration
+    //runge kutta solution 
+    function tracePath(x, y){
+        let r = Math.sqrt(x*x + y*y) * pixelToSoaceRatio;
+        var U = 1 / r;
+
+        var Phi = Math.atan2(y, x);
+        
+        var Vr = xDir * Math.cos(Phi) + yDir * Math.sin(Phi);
+        var vPhi = -xDir * Math.sin(Phi) + yDir * Math.cos(Phi); 
+
+        var DeltaPhi = -0.0001;
+        var lastR = 99999999;
+
+        if(vPhi < 0){
+        }else{
+            DeltaPhi *= -1;
+        }
+
+        var drdPhi = r * (Vr / vPhi);
+        var dUdPhi1 = (-1 / (r*r) ) * drdPhi;
+
+        var totChange = 0;
+
+        var stopped = false;
+        var hit = false;
+        function updatePosition() {
+            //DeltaPhi = -0.0001 * r*r
+            if(r < rs){
+                //stoppa
+                stopped = true;
+                hit = true; 
+                return;
+                //DeltaPhi = 0;
+            }
+            var k1 = dUdPhi2Func(U);
+            var k2 = dUdPhi2Func(U + 0.5 * DeltaPhi * dUdPhi1);
+            var k3 = dUdPhi2Func(U + 0.5 * DeltaPhi * dUdPhi1 + (0.25 * Math.pow(DeltaPhi, 2)) * k1);
+            var k4 = dUdPhi2Func(U + DeltaPhi * dUdPhi1 + (0.5 * Math.pow(DeltaPhi, 2)) * k2);
+            U = U + DeltaPhi * dUdPhi1 + ((DeltaPhi * DeltaPhi) / 6) * (k1 + k2 + k3);
+            lastR = r;
+            r = 1 / U
+
+
+            dUdPhi1 = dUdPhi1 + (DeltaPhi / 6) * (k1 + 2 * k2 + 2 * k3 + k4);
+            Phi += Math.abs(DeltaPhi);
+            totChange += (DeltaPhi);
+        }
+
+        function dUdPhi2Func(u) {
+            return 1.5 * rs * u * u - u;
+        }
+
+        for (let i = 0; i < steps; i++) {
+
+            const xPos = r * Math.cos(Phi);
+            const yPos = r * Math.sin(Phi);
+
+            if(!stopped){
+                lastx = finalx;
+                lasty = finaly;
+                finalx = xPos;
+                finaly = yPos;
+        //    console.log(finalx - lastx)
+            }
+            if(stopped){
+                stopped = true;
+                break;
+            }else if (r > rs * 10 && lastR <= r) {
+                stopped = true;
+            }
+
+            else{
+                updatePosition();
+            }
+        }
+
+        return {
+            sangle : totChange,
+            angle : Phi, 
+            hit : hit
+        }
+    }
+
+
+
+//ctx.clearRect(-canvas.width / 2, -canvas.height / 2, canvas.width, canvas.height);
+const imageData = ctx.createImageData(canvas.width, canvas.height);
+const data = imageData.data
+const pixelWidth = canvas.width / resX;
+const pixelHeight = canvas.height / resY;
+let i = 0;
+let j = 0;
+var xDir = 1;
+var yDir = 0;
+
+var dataALL = new Array(resY).fill(0).map(() => new Array(resX).fill(0));
+var ColorsALL = new Array(resY).fill(0).map(() => new Array(resX).fill(0)).map(() => new Array(4).fill(0));
+var dataCoutner = 0;
+
+    //get colors, and set up data for linear interpolation
+function getColors(){
+
+    for (let j = 0; j < resY; j++) {  
+    const quotient2 = (j / resY);
+    var changeR = quotient2 * 2000;
+
+    var startColor = -1;
+    var dist = 0;
+    ColorsALL[j][resX] = [0.0, 0.0,0.0, 0.0];
+    for (let i = 0; i < resX; i++) {  
+        const quotient = (i / resX);
+        var angle = -quotient * (Math.PI * 0.69);
+        xDir = Math.cos(angle);
+        yDir = Math.sin(angle);
+
+        var res = tracePath(-changeR - 15, 0.0);
+        const phi = Math.abs(res.angle);
+
+        var wangle = res.sangle;
+        var offSetAngle = ((-res.sangle)) % (Math.PI * 2);
+        deflectAngle = angleFromVectorAtoB([xDir, yDir], [finalx - lastx, finaly - lasty]);
+
+        var normalized = (deflectAngle) / (Math.PI * 2);
+        var thisColor = parseInt(Math.round(normalized * 255));
+        normalized = thisColor;
+        if(i == 0){
+            startColor = normalized;
+        }
+
+        if(res.hit){
+            ColorsALL[j][i] = [-1, 0, 0 , 0];
+        }else{
+            /*if(normalized != startColor){
+                ColorsALL[j][i] = [normalized, null, 1, null];
+                for (let k = 1; k <= dist; k++) {
+              //      console.log(normalized)
+                    ColorsALL[j][i - k][1] = normalized;
+                    ColorsALL[j][i - k][3] = k;
+                }
+                dist = 1;
+                startColor = normalized;
+            }else{
+                ColorsALL[j][i] = [startColor, null, dist, null];
+                dist++;
+            }*/
+
+            ColorsALL[j][i] = [0, thisColor, 0,255];
+
+        }
+        
+        dataCoutner++;
+    }
+    ColorsALL[j].pop();
+}
+
+}
+
+
+//test code
+function testLinearInterp(array){
+    array[array.length] = 0;
+    var startColor = array[0];
+    var dist = 0;
+    values = new Array(5).fill(0).map(() => new Array(4).fill(0));
+    for (let i = 0; i < array.length; i++) {
+        normalized = array[i];
+        if(normalized != startColor){
+            values[i] = [normalized, null, 0, null];
+            for (let k = 1; k <= dist; k++) {
+                values[i - k][1] = normalized;
+                values[i - k][3] = k;
+            }
+            dist = 1;
+            startColor = normalized;
+        }else{
+            values[i] = [startColor, null, dist, null];
+            dist++;
+        }
+    }
+    return values;
+}
+
+
+
+//draw to canvas
+function drawSquare() {
+    getColors()
+    const rectWidth = canvas.width / resX;
+    const rectHeight = canvas.height / resY;
+
+    for (let i = 0; i < resX; i++) {
+        const quotient = (i / resX);
+        var angle = -quotient * (Math.PI);
+        xDir = Math.cos(angle)
+        yDir = Math.sin(angle)
+
+        dataALL[i] = [];
+        var thisRESA = [];
+        for (let j = 0; j < resY; j++) {
+
+            var [normd, oth, d, d2] = ColorsALL[j][i];
+
+            //var distnO = quotient * Math.PI * d;
+            //var p1 = [-angle, normd]
+            //console.log(normd, oth, d, d2)
+        
+            if(normd == -1){
+
+                ctx.fillStyle = `rgba(${255}, ${0}, ${0}, ${255})`;
+            }else{
+                ctx.fillStyle = `rgba(${oth }, ${oth }, ${d}, ${d2 / 255})`;
+            }
+
+            //TODO some kind of interpolation 
+
+           ctx.imageSmoothingEnabled = false; 
+           ctx.fillRect(i * rectWidth, j * rectHeight, rectWidth, rectHeight);
+
+        /*
+           let intVal = Math.floor(ColorsALL[j][i][0] * 4294967295); 
+           console.log("hejs")
+            var colors =  [
+                (intVal >> 24) & 255,
+                (intVal >> 16) & 255,
+                (intVal >> 8) & 255,
+                intVal & 255 
+            ];            
+           
+           if (normd == -1) {
+                ctx.fillStyle = `rgba(255, 255, 255, 1)`; 
+            } else {
+                if (colors[0] === 255 && colors[1] === 255 && colors[2] === 255 && colors[3] === 255) {
+                    colors[3] = 255; 
+                }
+               ctx.fillStyle = `rgba(${colors[3]}, ${colors[2]}, ${colors[1]}, ${colors[0] / 255})`;
+           }*/
+
+
+         //   ctx.strokeRect(i * rectWidth - 1, j * rectHeight - 1, rectWidth,  rectHeight);
+            dataCoutner++;
+        }
+        
+
+  
+    }
+
+}
+
+function drawSquare2ESTIMATE(R) {
+    var returnArray = [];
+    var shift = -0.479864198488 / (1 - 1.0534167218858*Math.pow(Math.E, 0.0031157708141*R))
+    for (let i = 0; i < resX; i++) {
+        const quotient = (i / resX);
+        var angle = quotient * 2 * Math.PI;
+
+       var res =(2 / (Math.pow(angle - shift,0.4)))
+
+       //console.log("shift : " + shift + "     R : " +  R + "    res : " + res)
+
+        returnArray[i] = Math.abs((Math.abs(res) %(Math.PI * 2))  / (Math.PI * 2) );
+
+  
+    }
+    return returnArray;
+
+}
+
+function drawSquare2(R) {
+    var returnArray = [];
+    for (let i = 0; i < resX; i++) {
+        const quotient = (i / resX);
+        var angle = -quotient * (Math.PI);
+        xDir = Math.cos(angle)
+        yDir = Math.sin(angle)
+        var lastNormalized = 99999999;
+
+        //var shift = -0.479864198488 / (1 - 1.0534167218858*Math.pow(Math.E, 0.0031157708141*angle))
+
+        var res = tracePath(-R,0.0 );
+        const phi = Math.abs(res.angle);
+        
+
+
+        var wangle = res.sangle;
+        var offSetAngle = ((-res.sangle)) % (Math.PI*2);
+        deflectAngle = angleFromVectorAtoB([xDir, yDir], [finalx- lastx, finaly - lasty]);
+
+        returnArray[i] = deflectAngle / (Math.PI * 2);
+
+  
+    }
+    return returnArray;
+
+}
+   
+
+
+canvas.width = resX;
+canvas.height = resY;
+
+
+requestAnimationFrame(drawSquare);
+
+    const jsonString = JSON.stringify(dataALL, null, 2);
+
+    var testArray = []
+
+    for (let i = 1; i <= resX; i++) {
+        testArray[i] = 2*Math.PI*(i / resX);
+        
+    }
+
+  var testRlol = Math.log(440);
+    document.getElementById('body').addEventListener('wheel', function(event) {
+
+        testRlol  += (60 / 2000) * event.deltaY * 0.01;
+        let ACtestRlol = Math.log(testRlol)
+        var p1 = {
+            x: testArray,
+            y: drawSquare2(Math.exp(testRlol)),
+            type: 'scatter'
+        };
+        var p2 = {
+            x: testArray,
+            y: drawSquare2ESTIMATE(Math.exp(testRlol)),
+            type: 'scatter'
+        };
+        var data222 = [p1]
+
+    })
+
+
+    function angleFromVectorAtoB(a, b) {
+
+        const angleA = Math.atan2(a[1], a[0]);
+        const angleB = Math.atan2(b[1], b[0]);
+
+        let angleDifference = angleB - angleA;
+        if (angleDifference < 0) {
+            angleDifference += 2 * Math.PI;
+        }
+
+        return angleDifference;
+    }
+
+    function vektorMagnitud(a){
+
+        var acc = 0;
+        for (let i = 0; i < a.length; i++) {
+            acc += Math.pow(a[i], 2); 
+        }
+        return Math.sqrt(acc)
+    }
+
+    function vektorScala(a, scal){
+
+        var res = [];
+        for (var i = 0; i < a.length; i++) {
+            res[i] = a[i]*=scal;    
+        }
+        return res;
+    }
+
+
+    //Enkel subtraktion a - b
+    function vektorSubtraction(a, b){
+
+        var res = [];
+        for (var i = 0; i < a.length; i++) {
+            res[i] = a[i] - b[i];    
+        }
+        return res;
+    }
+
+    function vektorAddition(a, b){
+
+        var res = [];
+        for (var i = 0; i < a.length; i++) {
+            res[i] = a[i] + b[i];    
+        }
+        return res;
+    }
+
+
+    //Enkel vektor projection. vektor a projeceras på vector b.
+    function projektion(a, b){
+        var scal = dotprodukt(a,b) / dotprodukt(b,b);
+        var res = [];
+        for (var i = 0; i < a.length; i++) {
+            res[i] = b[i]*scal;    
+        }
+        return res;
+    }
+
+    //enkel dotprodukt för vektorere
+    function dotprodukt(a, b){
+        var acc = 0;
+        for (var i = 0; i < a.length; i++) {
+            acc += a[i]*b[i];                        
+        }    
+        return acc;   
+    }  
+
+</script>
+</body>
+</html>
