@@ -182,7 +182,7 @@
     canvas.addEventListener('mousedown', function(event) {
         const mousePos = getMousePosition(event);
         const dist = Math.sqrt(Math.pow((mousePos.x - canvas.width*0.5) - startx, 2) + Math.pow((mousePos.y - canvas.height*0.5) - starty, 2))
-        if (dist <= radius * 3) {
+        if (dist <= radius * 5) {
             isDragging = true;
             document.body.style.cursor = 'grabbing';
         }
